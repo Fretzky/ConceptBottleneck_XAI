@@ -1,6 +1,6 @@
 
 # General
-BASE_DIR = '/home/fgoretzky/Master/xai/'
+BASE_DIR = ''
 N_ATTRIBUTES = 312
 N_CLASSES = 200
 
