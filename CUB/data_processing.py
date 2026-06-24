@@ -7,20 +7,31 @@ import random
 import pickle
 import argparse
 from os import listdir
-from os.path import isfile, isdir, join
+from os.path import isfile, isdir, join, abspath, realpath
 from collections import defaultdict as ddict
 
 
 def extract_data(data_dir):
-    cwd = os.getcwd()
-    data_path = join(cwd,data_dir + '/images')
+
+    #### change this to be able to run from any directory
+
+    abs_data_dir = abspath(data_dir)
+    # cwd = os.getcwd()
+    # data_path = join(cwd,data_dir + '/images')
+    images_path = realpath(join(data_dir, 'images'))
+
+    images_txt_path = join(abs_data_dir, 'images.txt')
+    image_attribute_labels_txt_path = join(abs_data_dir, 'attributes/image_attribute_labels.txt')
+    train_test_split_txt_path = join(abs_data_dir, 'train_test_split.txt')
+    print(f"data_path: {images_path}\n images_txt_path: {images_txt_path}\n image_attribute_labels_txt_path: {image_attribute_labels_txt_path}\n train_test_split_txt_path: {train_test_split_txt_path}")
+
     val_ratio = 0.2
 
     path_to_id_map = dict() #map from full image path to image id
-    with open(data_path.replace('images', 'images.txt'), 'r') as f:
+    with open(images_txt_path, 'r') as f:
         for line in f:
             items = line.strip().split()
-            path_to_id_map[join(data_path, items[1])] = int(items[0])
+            path_to_id_map[join(images_path, items[1])] = int(items[0])
 
     attribute_labels_all = ddict(list) #map from image id to a list of attribute labels
     attribute_certainties_all = ddict(list) #map from image id to a list of attribute certainties
@@ -28,7 +39,7 @@ def extract_data(data_dir):
     # 1 = not visible, 2 = guessing, 3 = probably, 4 = definitely
     uncertainty_map = {1: {1: 0, 2: 0.5, 3: 0.75, 4:1}, #calibrate main label based on uncertainty label
                         0: {1: 0, 2: 0.5, 3: 0.25, 4: 0}}
-    with open(join(cwd, data_dir + '/attributes/image_attribute_labels.txt'), 'r') as f:
+    with open(image_attribute_labels_txt_path, 'r') as f:
         for line in f:
             file_idx, attribute_idx, attribute_label, attribute_certainty = line.strip().split()[:4]
             attribute_label = int(attribute_label)
@@ -39,7 +50,7 @@ def extract_data(data_dir):
             attribute_certainties_all[int(file_idx)].append(attribute_certainty)
 
     is_train_test = dict() #map from image id to 0 / 1 (1 = train)
-    with open(join(cwd, data_dir + '/train_test_split.txt'), 'r') as f:
+    with open(train_test_split_txt_path, 'r') as f:
         for line in f:
             idx, is_train = line.strip().split()
             is_train_test[int(idx)] = int(is_train)
@@ -47,10 +58,10 @@ def extract_data(data_dir):
 
     train_val_data, test_data = [], []
     train_data, val_data = [], []
-    folder_list = [f for f in listdir(data_path) if isdir(join(data_path, f))]
+    folder_list = [f for f in listdir(images_path) if isdir(join(images_path, f))]
     folder_list.sort() #sort by class index
     for i, folder in enumerate(folder_list):
-        folder_path = join(data_path, folder)
+        folder_path = join(images_path, folder)
         classfile_list = [cf for cf in listdir(folder_path) if (isfile(join(folder_path,cf)) and cf[0] != '.')]
         #classfile_list.sort()
         for cf in classfile_list:
