@@ -9,6 +9,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import math
 import torch
+torch.backends.cudnn.benchmark = True
+
 import numpy as np
 from analysis import Logger, AverageMeter, accuracy, binary_accuracy
 
@@ -127,6 +129,8 @@ def run_epoch(model, optimizer, loader, loss_meter, acc_meter, criterion, attr_c
             optimizer.step()
     return loss_meter, acc_meter
 
+from tqdm import tqdm
+
 def train(model, args):
     # Determine imbalance
     imbalance = None
@@ -147,7 +151,19 @@ def train(model, args):
     logger.write(str(args) + '\n')
     logger.write(str(imbalance) + '\n')
     logger.flush()
+    # --- WANDB SETUP START ---
+    today = str(np.datetime64('today', 'D'))
+    import wandb
+    wandb.init(
+        project="cub-concept-bottleneck",      # Name deines Projekts im Dashboard
+        name=f"{args.exp}_seed{args.seed}_{today}",    # Name des spezifischen Runs
+        config=vars(args)                      # Speichert alle Argparse-Parameter!
+    )
+    # --- WANDB SETUP END ---
 
+    model = model.cuda()
+    
+    wandb.watch(model, log="all", log_freq=50)
     model = model.cuda()
     criterion = torch.nn.CrossEntropyLoss()
     if args.use_attr and not args.no_img:
@@ -155,6 +171,11 @@ def train(model, args):
         if args.weighted_loss:
             assert(imbalance is not None)
             for ratio in imbalance:
+                # --- BUGFIX START ---
+                # Fange Division durch Null (Infinity) oder kaputte Werte (NaN) ab
+                if math.isinf(ratio) or math.isnan(ratio):
+                    ratio = 1.0  # Setze das Gewicht auf neutral, falls das Attribut im Sub-Datensatz nicht existiert
+                # --- BUGFIX END ---
                 attr_criterion.append(torch.nn.BCEWithLogitsLoss(weight=torch.FloatTensor([ratio]).cuda()))
         else:
             for i in range(args.n_attributes):
@@ -190,7 +211,7 @@ def train(model, args):
     best_val_loss = float('inf')
     best_val_acc = 0
 
-    for epoch in range(0, args.epochs):
+    for epoch in tqdm(range(0, args.epochs), desc="Epoch", unit="epoch"):
         train_loss_meter = AverageMeter()
         train_acc_meter = AverageMeter()
         if args.no_img:
@@ -213,6 +234,17 @@ def train(model, args):
             val_acc_meter = train_acc_meter
 
         if best_val_acc < val_acc_meter.avg:
+            # --- BUGFIX: Alle W&B Hooks vor dem Speichern gewaltsam entfernen ---
+            import wandb
+            wandb.unwatch() # Sagt WandB, dass es das Modell in Ruhe lassen soll
+            
+            for module in model.modules():
+                module._backward_hooks.clear()
+                module._forward_hooks.clear()
+                module._forward_pre_hooks.clear()
+                if hasattr(module, '_state_dict_hooks'):
+                    module._state_dict_hooks.clear()
+            # ---------------------------------------------------------------------
             best_val_epoch = epoch
             best_val_acc = val_acc_meter.avg
             logger.write('New model best model at epoch %d\n' % epoch)
@@ -228,12 +260,22 @@ def train(model, args):
                 'Best val epoch: %d\n'
                 % (epoch, train_loss_avg, train_acc_meter.avg, val_loss_avg, val_acc_meter.avg, best_val_epoch)) 
         logger.flush()
+        # --- WANDB LOGGING START ---
+        wandb.log({
+            "epoch": epoch,
+            "train/loss": train_loss_avg,
+            "train/accuracy": train_acc_meter.avg,
+            "val/loss": val_loss_avg,
+            "val/accuracy": val_acc_meter.avg,
+            "learning_rate": scheduler.get_last_lr()[0] if hasattr(scheduler, 'get_last_lr') else args.lr
+        })
+        # --- WANDB LOGGING END ---
         
         if epoch <= stop_epoch:
             scheduler.step(epoch) #scheduler step to update lr at the end of epoch     
         #inspect lr
         if epoch % 10 == 0:
-            print('Current lr:', scheduler.get_lr())
+            print('Current lr:', scheduler.get_last_lr())
 
         # if epoch % args.save_step == 0:
         #     torch.save(model, os.path.join(args.log_dir, '%d_model.pth' % epoch))

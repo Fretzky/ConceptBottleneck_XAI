@@ -51,16 +51,21 @@ class CUBDataset(Dataset):
         # Trim unnecessary paths
         try:
             idx = img_path.split('/').index('CUB_200_2011')
+            relative_parts = img_path.split('/')[idx + 2:]
             if self.image_dir != 'images':
-                img_path = '/'.join([self.image_dir] + img_path.split('/')[idx+1:])
-                img_path = img_path.replace('images/', '')
+                img_path = os.path.join(self.image_dir, *relative_parts)
             else:
                 img_path = '/'.join(img_path.split('/')[idx:])
+            print(f"Loading image from path {img_path}")
             img = Image.open(img_path).convert('RGB')
+
         except:
-            img_path_split = img_path.split('/')
-            split = 'train' if self.is_train else 'test'
-            img_path = '/'.join(img_path_split[:2] + [split] + img_path_split[2:])
+            # img_path_split = img_path.split('/')
+            # split = 'train' if self.is_train else 'test'
+            # if self.image_dir != 'images':
+            #     img_path = os.path.join(self.image_dir, split, *img_path_split[2:])
+            # else:
+            #     img_path = '/'.join(img_path_split[:2] + [split] + img_path_split[2:])s
             img = Image.open(img_path).convert('RGB')
 
         class_label = img_data['class_label']
@@ -164,9 +169,9 @@ def load_data(pkl_paths, use_attr, no_img, batch_size, uncertain_label=False, n_
         shuffle = False
     if resampling:
         sampler = BatchSampler(ImbalancedDatasetSampler(dataset), batch_size=batch_size, drop_last=drop_last)
-        loader = DataLoader(dataset, batch_sampler=sampler)
+        loader = DataLoader(dataset, batch_sampler=sampler, pin_memory=True, num_workers=8)
     else:
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, pin_memory=True, num_workers=8)
     return loader
 
 def find_class_imbalance(pkl_file, multiple_attr=False, attr_idx=-1):
@@ -198,7 +203,16 @@ def find_class_imbalance(pkl_file, multiple_attr=False, attr_idx=-1):
             else:
                 n_ones[0] += sum(labels)
     for j in range(len(n_ones)):
-        imbalance_ratio.append(total[j]/n_ones[j] - 1)
+        # --- BUGFIX START ---
+        # Fange Division durch Null (Infinity) oder kaputte Werte (NaN) ab
+        if n_ones[j] == 0:
+            # Wenn es keine positiven Beispiele gibt, setze das Gewicht auf 0
+            # (Dieser Wert wird ohnehin nie für dieses Attribut getriggert)
+            imbalance_ratio.append(0.0)
+        else:
+        # --- BUGFIX END ---
+            imbalance_ratio.append(total[j]/n_ones[j] - 1)
+
     if not multiple_attr: #e.g. [9.0] --> [9.0] * 312
         imbalance_ratio *= n_attr
     return imbalance_ratio

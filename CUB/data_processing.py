@@ -54,6 +54,8 @@ def extract_data(data_dir):
         classfile_list = [cf for cf in listdir(folder_path) if (isfile(join(folder_path,cf)) and cf[0] != '.')]
         #classfile_list.sort()
         for cf in classfile_list:
+            if join(folder_path, cf) not in path_to_id_map:
+                continue
             img_id = path_to_id_map[join(folder_path, cf)]
             img_path = join(folder_path, cf)
             metadata = {'id': img_id, 'img_path': img_path, 'class_label': i,
@@ -61,11 +63,11 @@ def extract_data(data_dir):
                       'uncertain_attribute_label': attribute_uncertain_labels_all[img_id]}
             if is_train_test[img_id]:
                 train_val_data.append(metadata)
-                if val_files is not None:
-                    if img_path in val_files:
-                        val_data.append(metadata)
-                    else:
-                        train_data.append(metadata)
+                # if val_files is not None:
+                #     if img_path in val_files:
+                #         val_data.append(metadata)
+                #     else:
+                #         train_data.append(metadata)
             else:
                 test_data.append(metadata)
 
@@ -83,7 +85,8 @@ if __name__ == "__main__":
     parser.add_argument('-data_dir', help='Where to load the datasets')
     args = parser.parse_args()
     train_data, val_data, test_data = extract_data(args.data_dir)
-
+    import os
+    os.makedirs(args.save_dir, exist_ok=True)
     for dataset in ['train','val','test']:
         print("Processing %s set" % dataset)
         f = open(args.save_dir + dataset + '.pkl', 'wb')

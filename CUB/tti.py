@@ -2,6 +2,7 @@
 # coding: utf-8
 import os
 import sys
+from time import time
 import torch
 import pickle
 import random
@@ -24,6 +25,12 @@ def simulate_group_intervention(mode, replace_val, preds_by_attr, ptl_5, ptl_95,
                                 b_attr_outputs, b_attr_outputs_sigmoid, b_attr_outputs2, b_attr_labels,
                                 instance_attr_labels, uncertainty_attr_labels, use_not_visible, min_uncertainty,
                                 n_replace, use_relu, use_sigmoid, n_trials=1, connect_CY=False):
+    
+    """
+    Diese Methode simuliert die Intervention auf gruppen von Attributen. 
+    Hier müssen wir einhaken und unsere Intervention durchführen.
+        
+    """
     assert len(instance_attr_labels) == len(b_attr_labels), 'len(instance_attr_labels): %d, len(b_attr_labels): %d' % (
     len(instance_attr_labels), len(b_attr_labels))
     assert len(uncertainty_attr_labels) == len(
@@ -44,7 +51,18 @@ def simulate_group_intervention(mode, replace_val, preds_by_attr, ptl_5, ptl_95,
                 for i in group_replace_idx:
                     replace_idx.extend(attr_group_dict[i])
                 return replace_idx
+        elif mode == 'adaptive':
+            replace_fn = lambda attr_preds: replace_adaptive(attr_preds)
+            def replace_adaptive(attr_preds):
+                replace_idx = []
+                # dont print shit out here !!!
+                # print("Here are the predicted attribute values for this image:", attr_preds)
 
+                group_replace_idx = list(random.sample(list(range(args.n_groups)), n_replace))
+                for i in group_replace_idx:
+                    replace_idx.extend(attr_group_dict[i])
+                return replace_idx
+            
         else:  # entropy
             replace_fn = lambda attr_preds, attr_preds_sigmoid, attr_labels, img_id, n_replace, replace_cached: \
                 replace_entropy_adaptive(attr_preds, attr_preds_sigmoid, attr_labels, img_id, n_replace, replace_cached)
@@ -281,19 +299,19 @@ def run(args):
 
     N_TRIALS = args.n_trials
     MIN_UNCERTAINTY_GAP = 0
-    assert args.mode in ['wrong_idx', 'entropy', 'uncertainty', 'random']
+    assert args.mode in ['wrong_idx', 'entropy', 'uncertainty', 'random', 'adaptive'] # adaptive strategy is used to select our intervention
     if args.class_level:
         REPLACE_VAL = 'class_level'
     else:
         REPLACE_VAL = 'instance_level'
 
     # stage 2
-    model = torch.load(args.model_dir)
+    model = torch.load(args.model_dir, weights_only=False)
     if args.model_dir2:
         if 'rf' in args.model_dir2:
-            model2 = load(args.model_dir2)
+            model2 = joblib.load(args.model_dir2)
         else:
-            model2 = torch.load(args.model_dir2)
+            model2 = torch.load(args.model_dir2, weights_only=False)
     else:  # end2end, split model into 2
         all_mods = list(model.modules())
         # model = ListModule(all_mods[:-1])
@@ -303,6 +321,7 @@ def run(args):
     for n_replace in list(range(args.n_groups + 1)):
         if 'random' not in args.mode:
             N_TRIALS = 1
+            
         acc = simulate_group_intervention(args.mode, REPLACE_VAL,
                                           preds_by_attr, ptl_5, ptl_95,
                                           model2,
@@ -343,5 +362,8 @@ if __name__ == '__main__':
     for no_intervention_group, value in zip(no_intervention_groups, values):
         output_string += '%.4f %.4f\n' % (no_intervention_group, value)
     print(output_string)
-    output = open(os.path.join(args.log_dir, 'results.txt'), 'w')
+    current_time = time.strftime("%Y-%m-%d %H:%M", time.localtime())
+    if not os.path.exists(args.log_dir):
+        os.makedirs(args.log_dir)
+    output = open(os.path.join(args.log_dir, f'results{current_time}.txt'), 'x')
     output.write(output_string)

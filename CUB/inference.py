@@ -3,12 +3,15 @@ Evaluate trained models on the official CUB test set
 """
 import os
 import sys
+import csv
+import json
 import torch
 import joblib
 import argparse
 import numpy as np
 from sklearn.metrics import f1_score
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from tqdm import tqdm
 
 from CUB.dataset import load_data
 from CUB.config import BASE_DIR, N_CLASSES, N_ATTRIBUTES
@@ -29,7 +32,7 @@ def eval(args):
     wrong_idx: image ids where the model got the wrong class prediction (to compare with other models)
     """
     if args.model_dir:
-        model = torch.load(args.model_dir)
+        model = torch.load(args.model_dir, weights_only=False)
     else:
         model = None
 
@@ -51,7 +54,7 @@ def eval(args):
         if 'rf' in args.model_dir2:
             model2 = joblib.load(args.model_dir2)
         else:
-            model2 = torch.load(args.model_dir2)
+            model2 = torch.load(args.model_dir2, weights_only=False)
         if not hasattr(model2, 'use_relu'):
             if args.use_relu:
                 model2.use_relu = True
@@ -85,20 +88,22 @@ def eval(args):
     all_attr_labels, all_attr_outputs, all_attr_outputs_sigmoid, all_attr_outputs2 = [], [], [], []
     all_class_labels, all_class_outputs, all_class_logits = [], [], []
     topk_class_labels, topk_class_outputs = [], []
+    wrong_rows = []
+    all_img_paths = []
 
-    for data_idx, data in enumerate(loader):
+    for data_idx, data in tqdm(enumerate(loader), total=len(loader)):
         if args.use_attr:
             if args.no_img:  # A -> Y
-                inputs, labels = data
+                inputs, labels, img_paths = data
                 if isinstance(inputs, list):
                     inputs = torch.stack(inputs).t().float()
                 inputs = inputs.float()
                 # inputs = torch.flatten(inputs, start_dim=1).float()
             else:
-                inputs, labels, attr_labels = data
+                inputs, labels, attr_labels, img_paths = data
                 attr_labels = torch.stack(attr_labels).t()  # N x 312
         else:  # simple finetune
-            inputs, labels = data
+            inputs, labels, img_paths = data
 
         inputs_var = torch.autograd.Variable(inputs).cuda()
         labels_var = torch.autograd.Variable(labels).cuda()
@@ -168,6 +173,15 @@ def eval(args):
         topk_class_outputs.extend(topk_preds.detach().cpu().numpy())
         topk_class_labels.extend(labels.view(-1, 1).expand_as(preds))
 
+        preds_np = preds.detach().cpu().numpy().flatten()
+        labels_np = labels.detach().cpu().numpy().flatten()
+        if isinstance(img_paths, str):
+            img_paths = [img_paths]
+        # keep a flattened list of image basenames for later lookup
+        all_img_paths.extend([os.path.basename(p) for p in img_paths])
+        # do not append wrong_rows here; we'll build full rows (including predicted attributes)
+        # after we have the full attribute outputs and the indices of wrong predictions
+
         np.set_printoptions(threshold=sys.maxsize)
         class_acc = accuracy(class_outputs, labels, topk=K)  # only class prediction accuracy
         for m in range(len(class_acc_meter)):
@@ -177,6 +191,29 @@ def eval(args):
     topk_class_outputs = np.vstack(topk_class_outputs)
     topk_class_labels = np.vstack(topk_class_labels)
     wrong_idx = np.where(np.sum(topk_class_outputs == topk_class_labels, axis=1) == 0)[0]
+
+    # extract the predicted attribute values for the wrong predictions for further analysis
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    all_attr_outputs2 = np.array(all_attr_outputs).reshape(-1, args.n_attributes)
+    wrong_attr_outputs = all_attr_outputs2[wrong_idx]
+    wrong_json_path = os.path.join(args.log_dir, 'wrong_predictions.json')
+    # build JSON records with predicted attribute dicts
+    records = []
+    for idx in wrong_idx:
+        filename = all_img_paths[idx]
+        pred_class = int(all_class_outputs[idx])
+        true_class = int(all_class_labels[idx])
+        attr_vector = all_attr_outputs2[idx]
+        attr_dict = {i: float(attr_vector[i]) for i in range(attr_vector.shape[0])}
+        records.append({
+            "filename": filename,
+            "pred_class": pred_class,
+            "true_class": true_class,
+            "predicted_attributes": attr_dict
+        })
+
+    with open(wrong_json_path, 'x') as jf:
+        json.dump(records, jf, indent=2)
 
     for j in range(len(K)):
         print('Average top %d class accuracy: %.5f' % (K[j], class_acc_meter[j].avg))

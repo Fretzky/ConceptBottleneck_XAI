@@ -62,6 +62,7 @@ def get_fraction_data(fraction, out_dir, data_file='train.pkl'):
     f = open(os.path.join(out_dir, data_file), 'wb')
     pickle.dump(new_data, f)
 
+# todo - read out attributes from data here and write a new file
 def get_class_attributes_data(min_class_count, out_dir, modify_data_dir='', keep_instance_data=False):
     """
     Use train.pkl to aggregate attributes on class level and only keep those that are predominantly 1 for at least min_class_count classes
