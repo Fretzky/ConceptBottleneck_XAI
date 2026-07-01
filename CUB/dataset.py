@@ -56,7 +56,7 @@ class CUBDataset(Dataset):
                 img_path = os.path.join(self.image_dir, *relative_parts)
             else:
                 img_path = '/'.join(img_path.split('/')[idx:])
-            print(f"Loading image from path {img_path}")
+            # print(f"Loading image from path {img_path}")
             img = Image.open(img_path).convert('RGB')
 
         except:

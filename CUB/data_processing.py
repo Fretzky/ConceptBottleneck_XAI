@@ -60,16 +60,22 @@ def extract_data(data_dir):
     train_data, val_data = [], []
     folder_list = [f for f in listdir(images_path) if isdir(join(images_path, f))]
     folder_list.sort() #sort by class index
+    new_class_idx = 0
     for i, folder in enumerate(folder_list):
         folder_path = join(images_path, folder)
         classfile_list = [cf for cf in listdir(folder_path) if (isfile(join(folder_path,cf)) and cf[0] != '.')]
+        
+        # mark if subfolder is relevant for the dataset
+        folder_has_valid_class = False
+
         #classfile_list.sort()
         for cf in classfile_list:
             if join(folder_path, cf) not in path_to_id_map:
                 continue
+            folder_has_valid_class = True
             img_id = path_to_id_map[join(folder_path, cf)]
             img_path = join(folder_path, cf)
-            metadata = {'id': img_id, 'img_path': img_path, 'class_label': i,
+            metadata = {'id': img_id, 'img_path': img_path, 'class_label': new_class_idx,
                       'attribute_label': attribute_labels_all[img_id], 'attribute_certainty': attribute_certainties_all[img_id],
                       'uncertain_attribute_label': attribute_uncertain_labels_all[img_id]}
             if is_train_test[img_id]:
@@ -81,7 +87,8 @@ def extract_data(data_dir):
                 #         train_data.append(metadata)
             else:
                 test_data.append(metadata)
-
+        if folder_has_valid_class:
+            new_class_idx += 1
     random.shuffle(train_val_data)
     split = int(val_ratio * len(train_val_data))
     train_data = train_val_data[split :]
